@@ -1038,3 +1038,83 @@ contract SonicSaver {
             if (p.active && p.rateBps >= minRateBps && p.rateBps <= maxRateBps) {
                 tmp[c] = id;
                 c++;
+            }
+        }
+        ids = new uint256[](c);
+        for (uint256 i = 0; i < c; i++) ids[i] = tmp[i];
+        return ids;
+    }
+
+    function getPodWithHighestRate() external view returns (uint256 podId, uint256 rateBps) {
+        uint256 maxId = nextPodId == 0 ? 0 : nextPodId - 1;
+        for (uint256 id = 1; id <= maxId; id++) {
+            PodConfig storage p = podConfig[id];
+            if (p.active && p.rateBps > rateBps) {
+                rateBps = p.rateBps;
+                podId = id;
+            }
+        }
+        return (podId, rateBps);
+    }
+
+    function getPodWithLongestLock() external view returns (uint256 podId, uint256 lockSeconds) {
+        uint256 maxId = nextPodId == 0 ? 0 : nextPodId - 1;
+        for (uint256 id = 1; id <= maxId; id++) {
+            PodConfig storage p = podConfig[id];
+            if (p.active && p.lockSeconds > lockSeconds) {
+                lockSeconds = p.lockSeconds;
+                podId = id;
+            }
+        }
+        return (podId, lockSeconds);
+    }
+
+    function getPodWithMostCapacityRemaining() external view returns (uint256 podId, uint256 capacityWei) {
+        uint256 maxId = nextPodId == 0 ? 0 : nextPodId - 1;
+        for (uint256 id = 1; id <= maxId; id++) {
+            PodConfig storage p = podConfig[id];
+            if (!p.active) continue;
+            uint256 rem = p.capWei > p.totalDeposited ? p.capWei - p.totalDeposited : 0;
+            if (rem > capacityWei) {
+                capacityWei = rem;
+                podId = id;
+            }
+        }
+        return (podId, capacityWei);
+    }
+
+    function getDepositIndicesUnlocked(uint256 podId, address user) external view returns (uint256[] memory indices) {
+        UserDeposit[] storage list = userDeposits[podId][user];
+        uint256[] memory tmp = new uint256[](list.length);
+        uint256 c = 0;
+        for (uint256 i = 0; i < list.length; i++) {
+            if (list[i].principalWei > 0 && block.timestamp >= list[i].unlockAt) {
+                tmp[c] = i;
+                c++;
+            }
+        }
+        indices = new uint256[](c);
+        for (uint256 i = 0; i < c; i++) indices[i] = tmp[i];
+        return indices;
+    }
+
+    function getDepositIndicesLocked(uint256 podId, address user) external view returns (uint256[] memory indices) {
+        UserDeposit[] storage list = userDeposits[podId][user];
+        uint256[] memory tmp = new uint256[](list.length);
+        uint256 c = 0;
+        for (uint256 i = 0; i < list.length; i++) {
+            if (list[i].principalWei > 0 && block.timestamp < list[i].unlockAt) {
+                tmp[c] = i;
+                c++;
+            }
+        }
+        indices = new uint256[](c);
+        for (uint256 i = 0; i < c; i++) indices[i] = tmp[i];
+        return indices;
+    }
+
+    function getTotalRewardAccruedSoFar(uint256 podId, address user, uint256 depositIndex) external view returns (uint256) {
+        return _computeReward(userDeposits[podId][user][depositIndex]);
+    }
+
+    function estimateRewardAtUnlock(uint256 podId, address user, uint256 depositIndex) external view returns (uint256) {
