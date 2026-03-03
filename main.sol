@@ -878,3 +878,83 @@ contract SonicSaver {
 
     function getRewardsForAllDepositsInPod(uint256 podId, address user) external view returns (uint256[] memory rewards) {
         UserDeposit[] storage list = userDeposits[podId][user];
+        rewards = new uint256[](list.length);
+        for (uint256 i = 0; i < list.length; i++) {
+            rewards[i] = _computeReward(list[i]);
+        }
+        return rewards;
+    }
+
+    function getPrincipalsForAllDepositsInPod(uint256 podId, address user) external view returns (uint256[] memory principals) {
+        UserDeposit[] storage list = userDeposits[podId][user];
+        principals = new uint256[](list.length);
+        for (uint256 i = 0; i < list.length; i++) {
+            principals[i] = list[i].principalWei;
+        }
+        return principals;
+    }
+
+    function getUnlockTimesForAllDepositsInPod(uint256 podId, address user) external view returns (uint256[] memory unlockAts) {
+        UserDeposit[] storage list = userDeposits[podId][user];
+        unlockAts = new uint256[](list.length);
+        for (uint256 i = 0; i < list.length; i++) {
+            unlockAts[i] = list[i].unlockAt;
+        }
+        return unlockAts;
+    }
+
+    function getRatesForAllDepositsInPod(uint256 podId, address user) external view returns (uint256[] memory rateBpsArr) {
+        UserDeposit[] storage list = userDeposits[podId][user];
+        rateBpsArr = new uint256[](list.length);
+        for (uint256 i = 0; i < list.length; i++) {
+            rateBpsArr[i] = list[i].rateBpsAtDeposit;
+        }
+        return rateBpsArr;
+    }
+
+    /*
+     * PROTOCOL BEHAVIOUR:
+     * - Guardian registers pods with lock duration (MIN_LOCK_SECONDS to MAX_LOCK_SECONDS), APR in bps (up to MAX_RATE_BPS), and capacity cap.
+     * - Users send ETH to deposit(podId, amountWei). A fee (feeBps) is sent to pulseCollector; the rest is recorded as principal and unlocks after lockSeconds.
+     * - After unlock, users may withdraw(podId, depositIndex) to receive principal + reward, or claimReward only. Reward = principal * rateBps * elapsed / (BPS_DENOM * SECONDS_PER_YEAR) after unlock.
+     * - Guardian can pause/unpause, set fee, update pod cap/rate, deactivate pod, and emergency sweep excess ETH (not reserved for user principal).
+     * - Reentrancy guard and pull-over-push pattern protect against reentrancy. Reserved wei is always at least sum of all pod totalDeposited.
+     */
+    /*
+     * SECURITY:
+     * - Only guardian can register/update pods, set fee, pause, sweep. pulseCollector and deployer are immutable.
+     * - Withdrawals and reward claims send ETH to msg.sender only. No arbitrary callbacks.
+     * - emergencySweepEth only allows sweeping balance above _totalReservedWei(), so user funds are never swept.
+     */
+    /*
+     * INTEGRATION:
+     * - Use getProtocolStats() for dashboard totals; getPodInfo(podId) / getPodSummary(podId) for pod details.
+     * - Use getUserDepositCount, getUserDeposit, getRewardForDeposit, getUnlockedDepositIndices for user positions.
+     * - Use getMaxDepositAllowed(podId) before deposit to avoid SSV_PodCapExceeded.
+     */
+
+    /// @notice Full snapshot of user state in one pod: principals, unlock times, claimable rewards, rates.
+    function getFullUserSnapshotInPod(uint256 podId, address user) external view returns (
+        uint256[] memory principals,
+        uint256[] memory unlockAts,
+        uint256[] memory claimableRewards,
+        uint256[] memory rateBpsAtDeposit
+    ) {
+        UserDeposit[] storage list = userDeposits[podId][user];
+        uint256 n = list.length;
+        principals = new uint256[](n);
+        unlockAts = new uint256[](n);
+        claimableRewards = new uint256[](n);
+        rateBpsAtDeposit = new uint256[](n);
+        for (uint256 i = 0; i < n; i++) {
+            principals[i] = list[i].principalWei;
+            unlockAts[i] = list[i].unlockAt;
+            claimableRewards[i] = _computeReward(list[i]);
+            rateBpsAtDeposit[i] = list[i].rateBpsAtDeposit;
+        }
+        return (principals, unlockAts, claimableRewards, rateBpsAtDeposit);
+    }
+
+    /// @notice All pod ids that have at least one active config (1 to nextPodId-1 inclusive).
+    function getAllPodIds() external view returns (uint256[] memory ids) {
+        uint256 maxId = nextPodId == 0 ? 0 : nextPodId - 1;
