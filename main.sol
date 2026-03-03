@@ -78,3 +78,83 @@ contract SonicSaver {
         uint256 rateBps;
         uint256 capWei;
         uint256 totalDeposited;
+        bool active;
+    }
+
+    struct UserDeposit {
+        uint256 principalWei;
+        uint256 unlockAt;
+        uint256 accruedRewardAtLock;
+        uint256 rateBpsAtDeposit;
+    }
+
+    mapping(uint256 => PodConfig) public podConfig;
+    mapping(uint256 => mapping(address => UserDeposit[])) public userDeposits;
+    mapping(uint256 => mapping(address => uint256)) public userDepositCount;
+
+    uint256 public totalFeesHarvestedWei;
+    uint256 public totalPrincipalDepositedWei;
+    uint256 public totalPrincipalWithdrawnWei;
+    uint256 public totalRewardPaidWei;
+    mapping(uint256 => uint256) public podCreatedAtBlock;
+    mapping(uint256 => bytes32) public podNameHash;
+
+    // -------------------------------------------------------------------------
+    // CONSTRUCTOR
+    // -------------------------------------------------------------------------
+
+    constructor() {
+        pulseCollector = 0x7E4a9c2B5d8F1e3A6b9C0d2E5f7A8b1c4D6e9F2a;
+        deployer = 0x2F5b8c1D4e7A0b3C6d9E2f5a8B1c4D7e0F3a6b9C;
+        guardian = 0x9A1b4C7d0E3f6a9B2c5D8e1F4a7b0C3d6E9f2A5b;
+        feeBps = 75;
+        nextPodId = 1;
+    }
+
+    // -------------------------------------------------------------------------
+    // MODIFIERS
+    // -------------------------------------------------------------------------
+
+    modifier onlyGuardian() {
+        if (msg.sender != guardian) revert SSV_NotGuardian();
+        _;
+    }
+
+    modifier whenNotPaused() {
+        if (protocolPaused) revert SSV_ProtocolPaused();
+        _;
+    }
+
+    modifier nonReentrant() {
+        if (_reentrancyLock != 0) revert SSV_Reentrancy();
+        _reentrancyLock = 1;
+        _;
+        _reentrancyLock = 0;
+    }
+
+    // -------------------------------------------------------------------------
+    // EXTERNAL: DEPOSIT (users)
+    // -------------------------------------------------------------------------
+
+    function deposit(uint256 podId, uint256 amountWei) external payable whenNotPaused nonReentrant {
+        if (msg.value != amountWei || amountWei == 0) revert SSV_ZeroAmount();
+        PodConfig storage pod = podConfig[podId];
+        if (!pod.active || pod.lockSeconds == 0) revert SSV_PodNotFound();
+        if (pod.rateBps > MAX_RATE_BPS) revert SSV_InvalidRateBps();
+        if (pod.totalDeposited + amountWei > pod.capWei) revert SSV_PodCapExceeded();
+
+        uint256 feeWei = (amountWei * feeBps) / BPS_DENOM;
+        uint256 netWei = amountWei - feeWei;
+        if (feeWei > 0) {
+            (bool feeOk,) = pulseCollector.call{value: feeWei}("");
+            if (!feeOk) revert SSV_TransferFailed();
+            totalFeesHarvestedWei += feeWei;
+            emit FeeHarvested(pulseCollector, feeWei);
+        }
+        totalPrincipalDepositedWei += netWei;
+
+        uint256 unlockAt = block.timestamp + pod.lockSeconds;
+        UserDeposit memory dep = UserDeposit({
+            principalWei: netWei,
+            unlockAt: unlockAt,
+            accruedRewardAtLock: 0,
