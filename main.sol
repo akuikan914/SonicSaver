@@ -398,3 +398,83 @@ contract SonicSaver {
         uint256 accruedRewardAtLock,
         uint256 rateBpsAtDeposit
     ) {
+        UserDeposit[] storage list = userDeposits[podId][user];
+        if (index >= list.length) return (0, 0, 0, 0);
+        UserDeposit storage d = list[index];
+        return (d.principalWei, d.unlockAt, d.accruedRewardAtLock, d.rateBpsAtDeposit);
+    }
+
+    function getTotalReservedWei() external view returns (uint256) {
+        return _totalReservedWei();
+    }
+
+    // -------------------------------------------------------------------------
+    // VIEW: PROTOCOL STATS
+    // -------------------------------------------------------------------------
+
+    function getProtocolStats() external view returns (
+        uint256 totalFeesWei_,
+        uint256 totalDepositedWei_,
+        uint256 totalWithdrawnWei_,
+        uint256 totalRewardsPaidWei_,
+        uint256 reservedWei_,
+        uint256 podCount_,
+        bool paused_
+    ) {
+        return (
+            totalFeesHarvestedWei,
+            totalPrincipalDepositedWei,
+            totalPrincipalWithdrawnWei,
+            totalRewardPaidWei,
+            _totalReservedWei(),
+            nextPodId - 1,
+            protocolPaused
+        );
+    }
+
+    function getPodInfo(uint256 podId) external view returns (
+        uint256 lockSeconds,
+        uint256 rateBps,
+        uint256 capWei,
+        uint256 totalDeposited,
+        bool active,
+        uint256 createdAtBlock,
+        bytes32 nameHash
+    ) {
+        PodConfig storage p = podConfig[podId];
+        return (
+            p.lockSeconds,
+            p.rateBps,
+            p.capWei,
+            p.totalDeposited,
+            p.active,
+            podCreatedAtBlock[podId],
+            podNameHash[podId]
+        );
+    }
+
+    function getActivePodIds(uint256 limit, uint256 offset) external view returns (uint256[] memory ids) {
+        uint256 maxId = nextPodId == 0 ? 0 : nextPodId - 1;
+        if (offset >= maxId) return new uint256[](0);
+        uint256 remain = maxId - offset;
+        uint256 size = limit > remain ? remain : limit;
+        ids = new uint256[](size);
+        uint256 count = 0;
+        for (uint256 id = offset + 1; id <= maxId && count < size; id++) {
+            if (podConfig[id].active) {
+                ids[count] = id;
+                count++;
+            }
+        }
+        if (count < size) {
+            uint256[] memory trimmed = new uint256[](count);
+            for (uint256 i = 0; i < count; i++) trimmed[i] = ids[i];
+            return trimmed;
+        }
+        return ids;
+    }
+
+    function getProjectedRewardAtTimestamp(uint256 podId, address user, uint256 depositIndex, uint256 atTimestamp) external view returns (uint256) {
+        UserDeposit[] storage list = userDeposits[podId][user];
+        if (depositIndex >= list.length) return 0;
+        UserDeposit storage d = list[depositIndex];
