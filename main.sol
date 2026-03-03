@@ -638,3 +638,83 @@ contract SonicSaver {
 
     /// @notice Pod lock duration in seconds.
     function getPodLockSeconds(uint256 podId) external view returns (uint256) {
+        return podConfig[podId].lockSeconds;
+    }
+
+    /// @notice Pod current rate in bps.
+    function getPodRateBps(uint256 podId) external view returns (uint256) {
+        return podConfig[podId].rateBps;
+    }
+
+    /// @notice Pod capacity cap in wei.
+    function getPodCapWei(uint256 podId) external view returns (uint256) {
+        return podConfig[podId].capWei;
+    }
+
+    /// @notice Pod total deposited so far.
+    function getPodTotalDeposited(uint256 podId) external view returns (uint256) {
+        return podConfig[podId].totalDeposited;
+    }
+
+    /// @notice Block at which pod was created.
+    function getPodCreatedBlock(uint256 podId) external view returns (uint256) {
+        return podCreatedAtBlock[podId];
+    }
+
+    /// @notice Name hash for pod (optional metadata).
+    function getPodNameHash(uint256 podId) external view returns (bytes32) {
+        return podNameHash[podId];
+    }
+
+    /// @notice Whether protocol is paused.
+    function isPaused() external view returns (bool) {
+        return protocolPaused;
+    }
+
+    /// @notice Max deposit allowed into a pod given current cap.
+    function getMaxDepositAllowed(uint256 podId) external view returns (uint256) {
+        PodConfig storage p = podConfig[podId];
+        if (!p.active) return 0;
+        if (p.totalDeposited >= p.capWei) return 0;
+        return p.capWei - p.totalDeposited;
+    }
+
+    /// @notice Fee in wei for a given deposit amount.
+    function computeFeeWei(uint256 amountWei) external view returns (uint256) {
+        return (amountWei * feeBps) / BPS_DENOM;
+    }
+
+    /// @notice Net amount user gets after fee for a given deposit.
+    function computeNetWei(uint256 amountWei) external view returns (uint256) {
+        return amountWei - (amountWei * feeBps) / BPS_DENOM;
+    }
+
+    function getCapacityRemaining(uint256 podId) external view returns (uint256) {
+        PodConfig storage p = podConfig[podId];
+        if (!p.active || p.totalDeposited >= p.capWei) return 0;
+        return p.capWei - p.totalDeposited;
+    }
+
+    // -------------------------------------------------------------------------
+    // VIEW: REWARD PROJECTION HELPERS
+    // -------------------------------------------------------------------------
+
+    /// @notice Projected reward for a principal after a given lock duration at a rate.
+    function projectRewardForPrincipal(uint256 principalWei, uint256 rateBps, uint256 lockSeconds) external pure returns (uint256 rewardWei) {
+        return (principalWei * rateBps * lockSeconds) / (BPS_DENOM * SECONDS_PER_YEAR);
+    }
+
+    /// @notice Effective annual rate in basis points for a pod.
+    function getPodAprBps(uint256 podId) external view returns (uint256) {
+        return podConfig[podId].rateBps;
+    }
+
+    /// @notice Whether a specific user deposit is unlocked.
+    function isDepositUnlocked(uint256 podId, address user, uint256 depositIndex) external view returns (bool) {
+        UserDeposit[] storage list = userDeposits[podId][user];
+        if (depositIndex >= list.length) return false;
+        return block.timestamp >= list[depositIndex].unlockAt && list[depositIndex].principalWei > 0;
+    }
+
+    /// @notice Count of deposits that are unlocked for a user in a pod.
+    function getUnlockedDepositCount(uint256 podId, address user) external view returns (uint256) {
