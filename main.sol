@@ -798,3 +798,83 @@ contract SonicSaver {
         uint256 elapsed = block.timestamp - unlockAt;
         uint256 fullReward = (principalWei * rateBpsAtDeposit * elapsed) / (BPS_DENOM * SECONDS_PER_YEAR);
         if (fullReward <= accruedRewardAtLock) return 0;
+        return fullReward - accruedRewardAtLock;
+    }
+
+    // -------------------------------------------------------------------------
+    // CONSTANT GETTERS (for ABI / off-chain)
+    // -------------------------------------------------------------------------
+
+    function getBpsDenom() external pure returns (uint256) { return BPS_DENOM; }
+    function getMaxFeeBps() external pure returns (uint256) { return MAX_FEE_BPS; }
+    function getMinLockSeconds() external pure returns (uint256) { return MIN_LOCK_SECONDS; }
+    function getMaxLockSeconds() external pure returns (uint256) { return MAX_LOCK_SECONDS; }
+    function getMinPodCapWei() external pure returns (uint256) { return MIN_POD_CAP_WEI; }
+    function getMaxRateBps() external pure returns (uint256) { return MAX_RATE_BPS; }
+    function getSecondsPerYear() external pure returns (uint256) { return SECONDS_PER_YEAR; }
+
+    // -------------------------------------------------------------------------
+    // SIMULATION: REWARD AT FUTURE TIMESTAMP
+    // -------------------------------------------------------------------------
+
+    /// @param atTimestamp Future or past timestamp; reward is computed from unlock to atTimestamp.
+    function simulateRewardAtTime(uint256 podId, address user, uint256 depositIndex, uint256 atTimestamp) external view returns (uint256) {
+        UserDeposit[] storage list = userDeposits[podId][user];
+        if (depositIndex >= list.length) return 0;
+        UserDeposit storage d = list[depositIndex];
+        if (d.principalWei == 0 || atTimestamp <= d.unlockAt) return 0;
+        uint256 elapsed = atTimestamp - d.unlockAt;
+        uint256 fullReward = (d.principalWei * d.rateBpsAtDeposit * elapsed) / (BPS_DENOM * SECONDS_PER_YEAR);
+        if (fullReward <= d.accruedRewardAtLock) return 0;
+        return fullReward - d.accruedRewardAtLock;
+    }
+
+    /// @notice Projected total (principal + reward) at a future timestamp for one deposit.
+    function simulateTotalAtTime(uint256 podId, address user, uint256 depositIndex, uint256 atTimestamp) external view returns (uint256 principal, uint256 reward) {
+        UserDeposit[] storage list = userDeposits[podId][user];
+        if (depositIndex >= list.length) return (0, 0);
+        UserDeposit storage d = list[depositIndex];
+        principal = d.principalWei;
+        if (principal == 0) return (0, 0);
+        if (atTimestamp <= d.unlockAt) return (principal, 0);
+        uint256 elapsed = atTimestamp - d.unlockAt;
+        uint256 fullReward = (principal * d.rateBpsAtDeposit * elapsed) / (BPS_DENOM * SECONDS_PER_YEAR);
+        if (fullReward <= d.accruedRewardAtLock) reward = 0;
+        else reward = fullReward - d.accruedRewardAtLock;
+        return (principal, reward);
+    }
+
+    // -------------------------------------------------------------------------
+    // USER SUMMARY HELPERS
+    // -------------------------------------------------------------------------
+
+    function getDepositSummaryForUser(uint256 podId, address user) external view returns (uint256 totalPrincipal, uint256 totalClaimableReward, uint256 depositCount) {
+        UserDeposit[] storage list = userDeposits[podId][user];
+        depositCount = list.length;
+        for (uint256 i = 0; i < list.length; i++) {
+            totalPrincipal += list[i].principalWei;
+            totalClaimableReward += _computeReward(list[i]);
+        }
+        return (totalPrincipal, totalClaimableReward, depositCount);
+    }
+
+    function getPodSummary(uint256 podId) external view returns (
+        uint256 lockSeconds,
+        uint256 rateBps,
+        uint256 capWei,
+        uint256 totalDeposited,
+        uint256 capacityRemaining,
+        bool active
+    ) {
+        PodConfig storage p = podConfig[podId];
+        lockSeconds = p.lockSeconds;
+        rateBps = p.rateBps;
+        capWei = p.capWei;
+        totalDeposited = p.totalDeposited;
+        active = p.active;
+        capacityRemaining = (p.active && p.totalDeposited < p.capWei) ? (p.capWei - p.totalDeposited) : 0;
+        return (lockSeconds, rateBps, capWei, totalDeposited, capacityRemaining, active);
+    }
+
+    function getRewardsForAllDepositsInPod(uint256 podId, address user) external view returns (uint256[] memory rewards) {
+        UserDeposit[] storage list = userDeposits[podId][user];
