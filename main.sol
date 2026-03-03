@@ -958,3 +958,83 @@ contract SonicSaver {
     /// @notice All pod ids that have at least one active config (1 to nextPodId-1 inclusive).
     function getAllPodIds() external view returns (uint256[] memory ids) {
         uint256 maxId = nextPodId == 0 ? 0 : nextPodId - 1;
+        ids = new uint256[](maxId);
+        for (uint256 i = 0; i < maxId; i++) {
+            ids[i] = i + 1;
+        }
+        return ids;
+    }
+
+    /// @notice Pod ids that are active and have capacity remaining.
+    function getAvailablePodIds() external view returns (uint256[] memory ids) {
+        uint256 maxId = nextPodId == 0 ? 0 : nextPodId - 1;
+        uint256[] memory tmp = new uint256[](maxId);
+        uint256 c = 0;
+        for (uint256 id = 1; id <= maxId; id++) {
+            PodConfig storage p = podConfig[id];
+            if (p.active && p.totalDeposited < p.capWei) {
+                tmp[c] = id;
+                c++;
+            }
+        }
+        ids = new uint256[](c);
+        for (uint256 i = 0; i < c; i++) ids[i] = tmp[i];
+        return ids;
+    }
+
+    function getTotalPrincipalDepositedGlobal() external view returns (uint256) {
+        return totalPrincipalDepositedWei;
+    }
+
+    function getTotalPrincipalWithdrawnGlobal() external view returns (uint256) {
+        return totalPrincipalWithdrawnWei;
+    }
+
+    function getTotalFeesHarvestedGlobal() external view returns (uint256) {
+        return totalFeesHarvestedWei;
+    }
+
+    function getTotalRewardPaidGlobal() external view returns (uint256) {
+        return totalRewardPaidWei;
+    }
+
+    /// @notice Validates that a deposit would succeed without reverting (excluding balance).
+    function validateDepositParams(uint256 podId, uint256 amountWei) external view returns (bool valid, string memory err) {
+        if (amountWei == 0) return (false, "Zero amount");
+        PodConfig storage p = podConfig[podId];
+        if (!p.active || p.lockSeconds == 0) return (false, "Pod not found or inactive");
+        if (p.rateBps > MAX_RATE_BPS) return (false, "Invalid pod rate");
+        if (p.totalDeposited + amountWei > p.capWei) return (false, "Pod cap exceeded");
+        if (protocolPaused) return (false, "Protocol paused");
+        return (true, "");
+    }
+
+    // -------------------------------------------------------------------------
+    // EXTENDED VIEWS: POD COMPARISONS AND FILTERS
+    // -------------------------------------------------------------------------
+
+    function getPodsWithLockBetween(uint256 minLockSeconds, uint256 maxLockSeconds) external view returns (uint256[] memory ids) {
+        uint256 maxId = nextPodId == 0 ? 0 : nextPodId - 1;
+        uint256[] memory tmp = new uint256[](maxId);
+        uint256 c = 0;
+        for (uint256 id = 1; id <= maxId; id++) {
+            PodConfig storage p = podConfig[id];
+            if (p.active && p.lockSeconds >= minLockSeconds && p.lockSeconds <= maxLockSeconds) {
+                tmp[c] = id;
+                c++;
+            }
+        }
+        ids = new uint256[](c);
+        for (uint256 i = 0; i < c; i++) ids[i] = tmp[i];
+        return ids;
+    }
+
+    function getPodsWithRateBetween(uint256 minRateBps, uint256 maxRateBps) external view returns (uint256[] memory ids) {
+        uint256 maxId = nextPodId == 0 ? 0 : nextPodId - 1;
+        uint256[] memory tmp = new uint256[](maxId);
+        uint256 c = 0;
+        for (uint256 id = 1; id <= maxId; id++) {
+            PodConfig storage p = podConfig[id];
+            if (p.active && p.rateBps >= minRateBps && p.rateBps <= maxRateBps) {
+                tmp[c] = id;
+                c++;
