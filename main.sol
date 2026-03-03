@@ -318,3 +318,83 @@ contract SonicSaver {
         uint256 prev = pod.capWei;
         pod.capWei = newCapWei;
         emit PodCapUpdated(podId, prev, newCapWei);
+    }
+
+    function setPodRate(uint256 podId, uint256 newRateBps) external onlyGuardian {
+        PodConfig storage pod = podConfig[podId];
+        if (!pod.active) revert SSV_PodNotFound();
+        if (newRateBps > MAX_RATE_BPS) revert SSV_InvalidRateBps();
+        uint256 prev = pod.rateBps;
+        pod.rateBps = newRateBps;
+        emit RateUpdated(podId, prev, newRateBps);
+    }
+
+    function deactivatePod(uint256 podId) external onlyGuardian {
+        PodConfig storage pod = podConfig[podId];
+        if (!pod.active) revert SSV_PodNotFound();
+        pod.active = false;
+    }
+
+    // -------------------------------------------------------------------------
+    // GUARDIAN: FEE & PAUSE
+    // -------------------------------------------------------------------------
+
+    function setFeeBps(uint256 newFeeBps) external onlyGuardian {
+        if (newFeeBps > MAX_FEE_BPS) revert SSV_InvalidRateBps();
+        feeBps = newFeeBps;
+    }
+
+    function setGuardian(address newGuardian) external onlyGuardian {
+        if (newGuardian == address(0)) revert SSV_ZeroAddress();
+        address prev = guardian;
+        guardian = newGuardian;
+        emit GuardianSet(prev, newGuardian);
+    }
+
+    function pause() external onlyGuardian {
+        if (protocolPaused) return;
+        protocolPaused = true;
+        emit ProtocolPaused(block.number);
+    }
+
+    function unpause() external onlyGuardian {
+        if (!protocolPaused) return;
+        protocolPaused = false;
+        emit ProtocolUnpaused(block.number);
+    }
+
+    // -------------------------------------------------------------------------
+    // GUARDIAN: EMERGENCY SWEEP (stuck ETH only; no user funds)
+    // -------------------------------------------------------------------------
+
+    function emergencySweepEth(uint256 amountWei) external onlyGuardian nonReentrant {
+        uint256 balance = address(this).balance;
+        uint256 reserved = _totalReservedWei();
+        if (amountWei > balance || balance - amountWei < reserved) revert SSV_InsufficientBalance();
+        (bool ok,) = pulseCollector.call{value: amountWei}("");
+        if (!ok) revert SSV_TransferFailed();
+        emit EmergencySweep(address(0), amountWei);
+    }
+
+    function _totalReservedWei() internal view returns (uint256) {
+        uint256 total = 0;
+        for (uint256 id = 1; id < nextPodId; id++) {
+            total += podConfig[id].totalDeposited;
+        }
+        return total;
+    }
+
+    // -------------------------------------------------------------------------
+    // VIEW: USER DEPOSITS
+    // -------------------------------------------------------------------------
+
+    function getUserDepositCount(uint256 podId, address user) external view returns (uint256) {
+        return userDeposits[podId][user].length;
+    }
+
+    function getUserDeposit(uint256 podId, address user, uint256 index) external view returns (
+        uint256 principalWei,
+        uint256 unlockAt,
+        uint256 accruedRewardAtLock,
+        uint256 rateBpsAtDeposit
+    ) {
