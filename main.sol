@@ -1278,3 +1278,83 @@ contract SonicSaver {
 
     /// @notice Returns deployer address (alias).
     function deployerAddress() external view returns (address) {
+        return deployer;
+    }
+
+    /*
+     * REWARD FORMULA:
+     * reward = principalWei * rateBps * elapsedSeconds / (BPS_DENOM * SECONDS_PER_YEAR)
+     * where elapsedSeconds = time since unlock (only accrues after unlock).
+     * So for a 365-day lock at 500 bps (5% APY), 1 ETH yields 0.05 ETH reward over the lock period,
+     * but reward only starts accruing after the lock ends. Before unlock, reward is 0.
+     */
+
+    /*
+     * FEE: Taken at deposit. feeWei = amountWei * feeBps / BPS_DENOM. Sent to pulseCollector. Net principal = amountWei - feeWei.
+     */
+
+    /*
+     * POD LIFECYCLE: Guardian registers pod (registerPod or registerPodWithName or registerPodsBatch).
+     * Pod can be updated (setPodCap, setPodRate) or deactivated (deactivatePod). Deactivated pods
+     * do not accept new deposits; existing deposits can still be withdrawn/claimed when unlocked.
+     */
+
+    /*
+     * PAUSE: When protocolPaused is true, deposit() and registerPod revert. Withdraw and claimReward
+     * remain allowed so users can exit. Guardian can pause/unpause.
+     */
+
+    // -------------------------------------------------------------------------
+    // ADDITIONAL VIEWS FOR FRONTENDS AND BOTS
+    // -------------------------------------------------------------------------
+
+    function getConstants() external pure returns (
+        uint256 bpsDenom,
+        uint256 maxFeeBps,
+        uint256 minLockSecs,
+        uint256 maxLockSecs,
+        uint256 minPodCapWei,
+        uint256 maxRateBps,
+        uint256 secondsPerYear
+    ) {
+        return (BPS_DENOM, MAX_FEE_BPS, MIN_LOCK_SECONDS, MAX_LOCK_SECONDS, MIN_POD_CAP_WEI, MAX_RATE_BPS, SECONDS_PER_YEAR);
+    }
+
+    function getState() external view returns (
+        address guardian_,
+        bool paused_,
+        uint256 feeBps_,
+        uint256 nextPodId_,
+        uint256 totalFeesWei_,
+        uint256 totalDepositedWei_,
+        uint256 totalWithdrawnWei_,
+        uint256 totalRewardPaidWei_
+    ) {
+        return (
+            guardian,
+            protocolPaused,
+            feeBps,
+            nextPodId,
+            totalFeesHarvestedWei,
+            totalPrincipalDepositedWei,
+            totalPrincipalWithdrawnWei,
+            totalRewardPaidWei
+        );
+    }
+
+    function getImmutables() external view returns (address pulseCollector_, address deployer_) {
+        return (pulseCollector, deployer);
+    }
+
+    function getPodIdsPaginated(uint256 pageSize, uint256 pageIndex) external view returns (uint256[] memory ids) {
+        uint256 maxId = nextPodId == 0 ? 0 : nextPodId - 1;
+        if (maxId == 0) return new uint256[](0);
+        uint256 start = pageIndex * pageSize;
+        if (start >= maxId) return new uint256[](0);
+        uint256 end = start + pageSize;
+        if (end > maxId) end = maxId;
+        uint256 n = end - start;
+        ids = new uint256[](n);
+        for (uint256 i = 0; i < n; i++) {
+            ids[i] = start + i + 1;
+        }
