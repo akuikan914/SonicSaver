@@ -1198,3 +1198,83 @@ contract SonicSaver {
         return (principalWei * rateBps * lockSeconds) / (BPS_DENOM * SECONDS_PER_YEAR);
     }
 
+    /// @notice Quote: unlock timestamp if user deposits now in podId.
+    function quoteUnlockTime(uint256 podId) external view returns (uint256 unlockAt) {
+        PodConfig storage p = podConfig[podId];
+        if (!p.active) return 0;
+        return block.timestamp + p.lockSeconds;
+    }
+
+    /// @notice Simulate: if user deposits amountWei into podId now, return (netWei, unlockAt, projectedRewardAtUnlock).
+    function simulateDeposit(uint256 podId, uint256 amountWei) external view returns (uint256 netWei, uint256 unlockAt, uint256 projectedRewardWei) {
+        PodConfig storage p = podConfig[podId];
+        if (!p.active || amountWei == 0) return (0, 0, 0);
+        netWei = amountWei - (amountWei * feeBps) / BPS_DENOM;
+        unlockAt = block.timestamp + p.lockSeconds;
+        projectedRewardWei = (netWei * p.rateBps * p.lockSeconds) / (BPS_DENOM * SECONDS_PER_YEAR);
+        return (netWei, unlockAt, projectedRewardWei);
+    }
+
+    /// @notice Annualised percentage (bps) for a pod.
+    function getPodAprBpsView(uint256 podId) external view returns (uint256) {
+        return podConfig[podId].rateBps;
+    }
+
+    /// @notice Lock duration in days (rounded down) for a pod.
+    function getPodLockDays(uint256 podId) external view returns (uint256) {
+        return podConfig[podId].lockSeconds / 1 days;
+    }
+
+    /// @notice Whether the contract has excess balance (donations) above reserved.
+    function hasExcessBalance() external view returns (bool) {
+        return address(this).balance > _totalReservedWei();
+    }
+
+    /// @notice Amount of excess balance (donations) that could be swept.
+    function getSweepableAmount() external view returns (uint256) {
+        uint256 bal = address(this).balance;
+        uint256 res = _totalReservedWei();
+        if (bal <= res) return 0;
+        return bal - res;
+    }
+
+    function getReservedWeiForPod(uint256 podId) external view returns (uint256) {
+        return podConfig[podId].totalDeposited;
+    }
+
+    function getTotalPrincipalInProtocol() external view returns (uint256) {
+        return _totalReservedWei();
+    }
+
+    /// @notice Reusable check: can user withdraw this deposit index?
+    function canWithdraw(uint256 podId, address user, uint256 depositIndex) external view returns (bool) {
+        UserDeposit[] storage list = userDeposits[podId][user];
+        if (depositIndex >= list.length) return false;
+        UserDeposit storage d = list[depositIndex];
+        return d.principalWei > 0 && block.timestamp >= d.unlockAt;
+    }
+
+    /// @notice Reusable check: does user have any claimable reward in this deposit?
+    function hasClaimableReward(uint256 podId, address user, uint256 depositIndex) external view returns (bool) {
+        UserDeposit[] storage list = userDeposits[podId][user];
+        if (depositIndex >= list.length) return false;
+        return _computeReward(list[depositIndex]) > 0;
+    }
+
+    /// @notice Returns fee bps (basis points) for protocol.
+    function getFeeBpsView() external view returns (uint256) {
+        return feeBps;
+    }
+
+    /// @notice Returns guardian address (alias for getGuardianAddress).
+    function guardianAddress() external view returns (address) {
+        return guardian;
+    }
+
+    /// @notice Returns pulse collector address (alias).
+    function pulseCollectorAddress() external view returns (address) {
+        return pulseCollector;
+    }
+
+    /// @notice Returns deployer address (alias).
+    function deployerAddress() external view returns (address) {
