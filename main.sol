@@ -558,3 +558,83 @@ contract SonicSaver {
         if (toId > maxId + 1) toId = maxId + 1;
         uint256 size = toId - fromId;
         ids = new uint256[](size);
+        lockSecondsArr = new uint256[](size);
+        rateBpsArr = new uint256[](size);
+        capWeiArr = new uint256[](size);
+        totalDepositedArr = new uint256[](size);
+        activeArr = new bool[](size);
+        for (uint256 i = 0; i < size; i++) {
+            uint256 id = fromId + i;
+            PodConfig storage p = podConfig[id];
+            ids[i] = id;
+            lockSecondsArr[i] = p.lockSeconds;
+            rateBpsArr[i] = p.rateBps;
+            capWeiArr[i] = p.capWei;
+            totalDepositedArr[i] = p.totalDeposited;
+            activeArr[i] = p.active;
+        }
+        return (ids, lockSecondsArr, rateBpsArr, capWeiArr, totalDepositedArr, activeArr);
+    }
+
+    function getEffectiveAprBps(uint256 podId) external view returns (uint256) {
+        PodConfig storage p = podConfig[podId];
+        if (!p.active) return 0;
+        return p.rateBps;
+    }
+
+    function getRemainingLockSeconds(uint256 podId, address user, uint256 depositIndex) external view returns (uint256) {
+        UserDeposit[] storage list = userDeposits[podId][user];
+        if (depositIndex >= list.length) return type(uint256).max;
+        UserDeposit storage d = list[depositIndex];
+        if (d.principalWei == 0) return type(uint256).max;
+        if (block.timestamp >= d.unlockAt) return 0;
+        return d.unlockAt - block.timestamp;
+    }
+
+    /// @notice Returns lock end timestamp for a deposit.
+    function getUnlockTimestamp(uint256 podId, address user, uint256 depositIndex) external view returns (uint256) {
+        UserDeposit[] storage list = userDeposits[podId][user];
+        if (depositIndex >= list.length) return 0;
+        return list[depositIndex].unlockAt;
+    }
+
+    /// @notice Returns principal for a deposit (zero if already withdrawn).
+    function getDepositPrincipal(uint256 podId, address user, uint256 depositIndex) external view returns (uint256) {
+        UserDeposit[] storage list = userDeposits[podId][user];
+        if (depositIndex >= list.length) return 0;
+        return list[depositIndex].principalWei;
+    }
+
+    /// @notice Returns rate in bps at time of deposit.
+    function getDepositRateBps(uint256 podId, address user, uint256 depositIndex) external view returns (uint256) {
+        UserDeposit[] storage list = userDeposits[podId][user];
+        if (depositIndex >= list.length) return 0;
+        return list[depositIndex].rateBpsAtDeposit;
+    }
+
+    /// @notice Sum of all principals across all pods for a user (expensive).
+    function getUserGlobalPrincipal(address user) external view returns (uint256) {
+        uint256 sum = 0;
+        for (uint256 id = 1; id < nextPodId; id++) {
+            UserDeposit[] storage list = userDeposits[id][user];
+            for (uint256 i = 0; i < list.length; i++) {
+                sum += list[i].principalWei;
+            }
+        }
+        return sum;
+    }
+
+    /// @notice Sum of all claimable rewards across all pods for a user (expensive).
+    function getUserGlobalClaimableReward(address user) external view returns (uint256) {
+        uint256 sum = 0;
+        for (uint256 id = 1; id < nextPodId; id++) {
+            UserDeposit[] storage list = userDeposits[id][user];
+            for (uint256 i = 0; i < list.length; i++) {
+                sum += _computeReward(list[i]);
+            }
+        }
+        return sum;
+    }
+
+    /// @notice Pod lock duration in seconds.
+    function getPodLockSeconds(uint256 podId) external view returns (uint256) {
