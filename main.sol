@@ -718,3 +718,83 @@ contract SonicSaver {
 
     /// @notice Count of deposits that are unlocked for a user in a pod.
     function getUnlockedDepositCount(uint256 podId, address user) external view returns (uint256) {
+        UserDeposit[] storage list = userDeposits[podId][user];
+        uint256 c = 0;
+        for (uint256 i = 0; i < list.length; i++) {
+            if (list[i].principalWei > 0 && block.timestamp >= list[i].unlockAt) c++;
+        }
+        return c;
+    }
+
+    /// @notice Indices of unlocked deposits for a user in a pod (bounded by maxReturn).
+    function getUnlockedDepositIndices(uint256 podId, address user, uint256 maxReturn) external view returns (uint256[] memory) {
+        UserDeposit[] storage list = userDeposits[podId][user];
+        uint256[] memory tmp = new uint256[](list.length);
+        uint256 c = 0;
+        for (uint256 i = 0; i < list.length && c < maxReturn; i++) {
+            if (list[i].principalWei > 0 && block.timestamp >= list[i].unlockAt) {
+                tmp[c] = i;
+                c++;
+            }
+        }
+        uint256[] memory out = new uint256[](c);
+        for (uint256 i = 0; i < c; i++) out[i] = tmp[i];
+        return out;
+    }
+
+    function getContractBalance() external view returns (uint256) {
+        return address(this).balance;
+    }
+
+    function getExcessBalance() external view returns (uint256) {
+        uint256 bal = address(this).balance;
+        uint256 res = _totalReservedWei();
+        if (bal <= res) return 0;
+        return bal - res;
+    }
+
+    function getFeeForAmount(uint256 amountWei) external view returns (uint256) {
+        return (amountWei * feeBps) / BPS_DENOM;
+    }
+
+    function getNetDepositForAmount(uint256 amountWei) external view returns (uint256) {
+        return amountWei - (amountWei * feeBps) / BPS_DENOM;
+    }
+
+    function getPodCount() external view returns (uint256) {
+        return nextPodId == 0 ? 0 : nextPodId - 1;
+    }
+
+    function isPodActive(uint256 podId) external view returns (bool) {
+        return podId >= 1 && podId < nextPodId && podConfig[podId].active;
+    }
+
+    function getGuardianAddress() external view returns (address) {
+        return guardian;
+    }
+
+    function getPulseCollectorAddress() external view returns (address) {
+        return pulseCollector;
+    }
+
+    function getDeployerAddress() external view returns (address) {
+        return deployer;
+    }
+
+    function getCurrentFeeBps() external view returns (uint256) {
+        return feeBps;
+    }
+
+    function getNextPodId() external view returns (uint256) {
+        return nextPodId;
+    }
+
+    // -------------------------------------------------------------------------
+    // INTERNAL VIEW HELPERS (exposed via wrapper for off-chain)
+    // -------------------------------------------------------------------------
+
+    function computeRewardForDepositView(uint256 principalWei, uint256 unlockAt, uint256 accruedRewardAtLock, uint256 rateBpsAtDeposit) external view returns (uint256) {
+        if (principalWei == 0 || block.timestamp <= unlockAt) return 0;
+        uint256 elapsed = block.timestamp - unlockAt;
+        uint256 fullReward = (principalWei * rateBpsAtDeposit * elapsed) / (BPS_DENOM * SECONDS_PER_YEAR);
+        if (fullReward <= accruedRewardAtLock) return 0;
