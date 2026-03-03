@@ -158,3 +158,83 @@ contract SonicSaver {
             principalWei: netWei,
             unlockAt: unlockAt,
             accruedRewardAtLock: 0,
+            rateBpsAtDeposit: pod.rateBps
+        });
+
+        uint256 idx = userDepositCount[podId][msg.sender];
+        if (idx >= userDeposits[podId][msg.sender].length) {
+            userDeposits[podId][msg.sender].push(dep);
+        } else {
+            userDeposits[podId][msg.sender].push(dep);
+        }
+        userDepositCount[podId][msg.sender] = userDeposits[podId][msg.sender].length;
+        pod.totalDeposited += netWei;
+
+        emit DepositPlaced(msg.sender, podId, netWei, unlockAt);
+    }
+
+    // -------------------------------------------------------------------------
+    // EXTERNAL: WITHDRAW (after lock)
+    // -------------------------------------------------------------------------
+
+    function withdraw(uint256 podId, uint256 depositIndex) external nonReentrant {
+        PodConfig storage pod = podConfig[podId];
+        if (!pod.active) revert SSV_PodNotFound();
+        UserDeposit[] storage list = userDeposits[podId][msg.sender];
+        if (depositIndex >= list.length) revert SSV_PodNotFound();
+
+        UserDeposit storage dep = list[depositIndex];
+        if (block.timestamp < dep.unlockAt) revert SSV_LockActive();
+
+        uint256 principal = dep.principalWei;
+        uint256 reward = _computeReward(dep);
+        uint256 total = principal + reward;
+
+        dep.principalWei = 0;
+        dep.unlockAt = 0;
+        dep.accruedRewardAtLock = 0;
+        dep.rateBpsAtDeposit = 0;
+
+        pod.totalDeposited -= principal;
+        totalPrincipalWithdrawnWei += principal;
+        totalRewardPaidWei += reward;
+
+        (bool ok,) = msg.sender.call{value: total}("");
+        if (!ok) revert SSV_TransferFailed();
+        emit WithdrawalExecuted(msg.sender, podId, principal, reward);
+    }
+
+    // -------------------------------------------------------------------------
+    // EXTERNAL: CLAIM REWARD (optional separate claim)
+    // -------------------------------------------------------------------------
+
+    function claimReward(uint256 podId, uint256 depositIndex) external nonReentrant {
+        UserDeposit[] storage list = userDeposits[podId][msg.sender];
+        if (depositIndex >= list.length) revert SSV_NothingToClaim();
+        UserDeposit storage dep = list[depositIndex];
+        if (dep.principalWei == 0) revert SSV_NothingToClaim();
+        if (block.timestamp < dep.unlockAt) revert SSV_LockActive();
+
+        uint256 reward = _computeReward(dep);
+        if (reward == 0) revert SSV_NothingToClaim();
+        dep.accruedRewardAtLock += reward;
+        totalRewardPaidWei += reward;
+
+        (bool ok,) = msg.sender.call{value: reward}("");
+        if (!ok) revert SSV_TransferFailed();
+        emit RewardClaimed(msg.sender, podId, reward);
+    }
+
+    // -------------------------------------------------------------------------
+    // VIEW: REWARD FOR ONE DEPOSIT
+    // -------------------------------------------------------------------------
+
+    function _computeReward(UserDeposit storage dep) internal view returns (uint256) {
+        if (dep.principalWei == 0 || block.timestamp <= dep.unlockAt) return 0;
+        uint256 elapsed = block.timestamp - dep.unlockAt;
+        uint256 rateBps = dep.rateBpsAtDeposit;
+        uint256 accrued = dep.accruedRewardAtLock;
+        uint256 fullReward = (dep.principalWei * rateBps * elapsed) / (BPS_DENOM * SECONDS_PER_YEAR);
+        if (fullReward <= accrued) return 0;
+        return fullReward - accrued;
+    }
