@@ -238,3 +238,83 @@ contract SonicSaver {
         if (fullReward <= accrued) return 0;
         return fullReward - accrued;
     }
+
+    function getRewardForDeposit(uint256 podId, address user, uint256 depositIndex) external view returns (uint256) {
+        UserDeposit[] storage list = userDeposits[podId][user];
+        if (depositIndex >= list.length) return 0;
+        return _computeReward(list[depositIndex]);
+    }
+
+    // -------------------------------------------------------------------------
+    // GUARDIAN: REGISTER POD
+    // -------------------------------------------------------------------------
+
+    function registerPod(uint256 lockSeconds, uint256 rateBps, uint256 capWei) external onlyGuardian whenNotPaused {
+        if (lockSeconds < MIN_LOCK_SECONDS || lockSeconds > MAX_LOCK_SECONDS) revert SSV_InvalidLockSeconds();
+        if (rateBps > MAX_RATE_BPS) revert SSV_InvalidRateBps();
+        if (capWei < MIN_POD_CAP_WEI) revert SSV_InvalidCapWei();
+
+        uint256 id = nextPodId++;
+        podConfig[id] = PodConfig({
+            lockSeconds: lockSeconds,
+            rateBps: rateBps,
+            capWei: capWei,
+            totalDeposited: 0,
+            active: true
+        });
+        podCreatedAtBlock[id] = block.number;
+        emit PodRegistered(id, lockSeconds, rateBps, capWei);
+    }
+
+    function registerPodWithName(uint256 lockSeconds, uint256 rateBps, uint256 capWei, bytes32 nameHash) external onlyGuardian whenNotPaused {
+        if (lockSeconds < MIN_LOCK_SECONDS || lockSeconds > MAX_LOCK_SECONDS) revert SSV_InvalidLockSeconds();
+        if (rateBps > MAX_RATE_BPS) revert SSV_InvalidRateBps();
+        if (capWei < MIN_POD_CAP_WEI) revert SSV_InvalidCapWei();
+        uint256 id = nextPodId++;
+        podConfig[id] = PodConfig({
+            lockSeconds: lockSeconds,
+            rateBps: rateBps,
+            capWei: capWei,
+            totalDeposited: 0,
+            active: true
+        });
+        podCreatedAtBlock[id] = block.number;
+        podNameHash[id] = nameHash;
+        emit PodRegistered(id, lockSeconds, rateBps, capWei);
+    }
+
+    function registerPodsBatch(
+        uint256[] calldata lockSecondsArr,
+        uint256[] calldata rateBpsArr,
+        uint256[] calldata capWeiArr
+    ) external onlyGuardian whenNotPaused {
+        uint256 n = lockSecondsArr.length;
+        if (n != rateBpsArr.length || n != capWeiArr.length) revert SSV_ArrayLengthMismatch();
+        for (uint256 i = 0; i < n; i++) {
+            if (lockSecondsArr[i] < MIN_LOCK_SECONDS || lockSecondsArr[i] > MAX_LOCK_SECONDS) revert SSV_InvalidLockSeconds();
+            if (rateBpsArr[i] > MAX_RATE_BPS) revert SSV_InvalidRateBps();
+            if (capWeiArr[i] < MIN_POD_CAP_WEI) revert SSV_InvalidCapWei();
+            uint256 id = nextPodId++;
+            podConfig[id] = PodConfig({
+                lockSeconds: lockSecondsArr[i],
+                rateBps: rateBpsArr[i],
+                capWei: capWeiArr[i],
+                totalDeposited: 0,
+                active: true
+            });
+            podCreatedAtBlock[id] = block.number;
+            emit PodRegistered(id, lockSecondsArr[i], rateBpsArr[i], capWeiArr[i]);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // GUARDIAN: UPDATE POD
+    // -------------------------------------------------------------------------
+
+    function setPodCap(uint256 podId, uint256 newCapWei) external onlyGuardian {
+        PodConfig storage pod = podConfig[podId];
+        if (!pod.active) revert SSV_PodNotFound();
+        if (newCapWei < pod.totalDeposited || newCapWei < MIN_POD_CAP_WEI) revert SSV_InvalidCapWei();
+        uint256 prev = pod.capWei;
+        pod.capWei = newCapWei;
+        emit PodCapUpdated(podId, prev, newCapWei);
