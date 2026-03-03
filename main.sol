@@ -478,3 +478,83 @@ contract SonicSaver {
         UserDeposit[] storage list = userDeposits[podId][user];
         if (depositIndex >= list.length) return 0;
         UserDeposit storage d = list[depositIndex];
+        if (d.principalWei == 0 || atTimestamp <= d.unlockAt) return 0;
+        uint256 elapsed = atTimestamp - d.unlockAt;
+        uint256 fullReward = (d.principalWei * d.rateBpsAtDeposit * elapsed) / (BPS_DENOM * SECONDS_PER_YEAR);
+        if (fullReward <= d.accruedRewardAtLock) return 0;
+        return fullReward - d.accruedRewardAtLock;
+    }
+
+    function getUserTotalPrincipalInPod(uint256 podId, address user) external view returns (uint256) {
+        UserDeposit[] storage list = userDeposits[podId][user];
+        uint256 sum = 0;
+        for (uint256 i = 0; i < list.length; i++) {
+            sum += list[i].principalWei;
+        }
+        return sum;
+    }
+
+    function getUserTotalClaimableRewardInPod(uint256 podId, address user) external view returns (uint256) {
+        UserDeposit[] storage list = userDeposits[podId][user];
+        uint256 sum = 0;
+        for (uint256 i = 0; i < list.length; i++) {
+            sum += _computeReward(list[i]);
+        }
+        return sum;
+    }
+
+    function getUserDepositsBatch(uint256 podId, address user, uint256 fromIndex, uint256 count) external view returns (
+        uint256[] memory principalWeiArr,
+        uint256[] memory unlockAtArr,
+        uint256[] memory accruedRewardAtLockArr,
+        uint256[] memory rateBpsArr
+    ) {
+        UserDeposit[] storage list = userDeposits[podId][user];
+        uint256 len = list.length;
+        if (fromIndex >= len) {
+            principalWeiArr = new uint256[](0);
+            unlockAtArr = new uint256[](0);
+            accruedRewardAtLockArr = new uint256[](0);
+            rateBpsArr = new uint256[](0);
+            return (principalWeiArr, unlockAtArr, accruedRewardAtLockArr, rateBpsArr);
+        }
+        uint256 toIndex = fromIndex + count;
+        if (toIndex > len) toIndex = len;
+        uint256 size = toIndex - fromIndex;
+        principalWeiArr = new uint256[](size);
+        unlockAtArr = new uint256[](size);
+        accruedRewardAtLockArr = new uint256[](size);
+        rateBpsArr = new uint256[](size);
+        for (uint256 i = 0; i < size; i++) {
+            UserDeposit storage d = list[fromIndex + i];
+            principalWeiArr[i] = d.principalWei;
+            unlockAtArr[i] = d.unlockAt;
+            accruedRewardAtLockArr[i] = d.accruedRewardAtLock;
+            rateBpsArr[i] = d.rateBpsAtDeposit;
+        }
+        return (principalWeiArr, unlockAtArr, accruedRewardAtLockArr, rateBpsArr);
+    }
+
+    function getPodsBatch(uint256 fromId, uint256 count) external view returns (
+        uint256[] memory ids,
+        uint256[] memory lockSecondsArr,
+        uint256[] memory rateBpsArr,
+        uint256[] memory capWeiArr,
+        uint256[] memory totalDepositedArr,
+        bool[] memory activeArr
+    ) {
+        uint256 maxId = nextPodId == 0 ? 0 : nextPodId - 1;
+        if (fromId < 1) fromId = 1;
+        if (fromId > maxId) {
+            ids = new uint256[](0);
+            lockSecondsArr = new uint256[](0);
+            rateBpsArr = new uint256[](0);
+            capWeiArr = new uint256[](0);
+            totalDepositedArr = new uint256[](0);
+            activeArr = new bool[](0);
+            return (ids, lockSecondsArr, rateBpsArr, capWeiArr, totalDepositedArr, activeArr);
+        }
+        uint256 toId = fromId + count;
+        if (toId > maxId + 1) toId = maxId + 1;
+        uint256 size = toId - fromId;
+        ids = new uint256[](size);
