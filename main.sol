@@ -1118,3 +1118,83 @@ contract SonicSaver {
     }
 
     function estimateRewardAtUnlock(uint256 podId, address user, uint256 depositIndex) external view returns (uint256) {
+        UserDeposit[] storage list = userDeposits[podId][user];
+        if (depositIndex >= list.length) return 0;
+        UserDeposit storage d = list[depositIndex];
+        if (d.principalWei == 0) return 0;
+        if (block.timestamp >= d.unlockAt) return _computeReward(d);
+        uint256 lockSeconds = d.unlockAt - block.timestamp;
+        return (d.principalWei * d.rateBpsAtDeposit * lockSeconds) / (BPS_DENOM * SECONDS_PER_YEAR);
+    }
+
+    function getAccruedRewardAtLockForDeposit(uint256 podId, address user, uint256 depositIndex) external view returns (uint256) {
+        UserDeposit[] storage list = userDeposits[podId][user];
+        if (depositIndex >= list.length) return 0;
+        return list[depositIndex].accruedRewardAtLock;
+    }
+
+    function getPodExists(uint256 podId) external view returns (bool) {
+        return podId >= 1 && podId < nextPodId;
+    }
+
+    function hasAnyDepositInPod(uint256 podId, address user) external view returns (bool) {
+        return userDeposits[podId][user].length > 0;
+    }
+
+    function hasActiveDepositInPod(uint256 podId, address user) external view returns (bool) {
+        UserDeposit[] storage list = userDeposits[podId][user];
+        for (uint256 i = 0; i < list.length; i++) {
+            if (list[i].principalWei > 0) return true;
+        }
+        return false;
+    }
+
+    function getFirstUnlockedDepositIndex(uint256 podId, address user) external view returns (uint256 index, bool found) {
+        UserDeposit[] storage list = userDeposits[podId][user];
+        for (uint256 i = 0; i < list.length; i++) {
+            if (list[i].principalWei > 0 && block.timestamp >= list[i].unlockAt) {
+                return (i, true);
+            }
+        }
+        return (0, false);
+    }
+
+    function getWithdrawableAmount(uint256 podId, address user, uint256 depositIndex) external view returns (uint256 principal, uint256 reward) {
+        UserDeposit[] storage list = userDeposits[podId][user];
+        if (depositIndex >= list.length) return (0, 0);
+        UserDeposit storage d = list[depositIndex];
+        principal = d.principalWei;
+        if (principal == 0) return (0, 0);
+        if (block.timestamp < d.unlockAt) return (0, 0);
+        reward = _computeReward(d);
+        return (principal, reward);
+    }
+
+    function getTotalWithdrawableForUserInPod(uint256 podId, address user) external view returns (uint256 totalPrincipal, uint256 totalReward) {
+        UserDeposit[] storage list = userDeposits[podId][user];
+        for (uint256 i = 0; i < list.length; i++) {
+            UserDeposit storage d = list[i];
+            if (d.principalWei == 0) continue;
+            if (block.timestamp < d.unlockAt) continue;
+            totalPrincipal += d.principalWei;
+            totalReward += _computeReward(d);
+        }
+        return (totalPrincipal, totalReward);
+    }
+
+    // -------------------------------------------------------------------------
+    // QUOTE AND SIMULATION HELPERS (no state change)
+    // -------------------------------------------------------------------------
+
+    /// @notice Quote: fee and net amount for a given deposit amount.
+    function quoteDeposit(uint256 amountWei) external view returns (uint256 feeWei, uint256 netWei) {
+        feeWei = (amountWei * feeBps) / BPS_DENOM;
+        netWei = amountWei - feeWei;
+        return (feeWei, netWei);
+    }
+
+    /// @notice Quote: total reward for a principal locked for lockSeconds at rateBps (pure).
+    function quoteReward(uint256 principalWei, uint256 rateBps, uint256 lockSeconds) external pure returns (uint256 rewardWei) {
+        return (principalWei * rateBps * lockSeconds) / (BPS_DENOM * SECONDS_PER_YEAR);
+    }
+
