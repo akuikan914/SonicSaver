@@ -1358,3 +1358,83 @@ contract SonicSaver {
         for (uint256 i = 0; i < n; i++) {
             ids[i] = start + i + 1;
         }
+        return ids;
+    }
+
+    function getUserPositionCountAcrossAllPods(address user) external view returns (uint256 totalDeposits) {
+        for (uint256 id = 1; id < nextPodId; id++) {
+            totalDeposits += userDeposits[id][user].length;
+        }
+        return totalDeposits;
+    }
+
+    function getPodsWhereUserHasDeposits(address user) external view returns (uint256[] memory podIds) {
+        uint256 maxId = nextPodId == 0 ? 0 : nextPodId - 1;
+        uint256[] memory tmp = new uint256[](maxId);
+        uint256 c = 0;
+        for (uint256 id = 1; id <= maxId; id++) {
+            if (userDeposits[id][user].length > 0) {
+                tmp[c] = id;
+                c++;
+            }
+        }
+        podIds = new uint256[](c);
+        for (uint256 i = 0; i < c; i++) podIds[i] = tmp[i];
+        return podIds;
+    }
+
+    function getBalanceAndReserved() external view returns (uint256 balanceWei, uint256 reservedWei) {
+        return (address(this).balance, _totalReservedWei());
+    }
+
+    function getDepositAt(uint256 podId, address user, uint256 index) external view returns (
+        uint256 principalWei,
+        uint256 unlockAt,
+        uint256 accruedRewardAtLock,
+        uint256 rateBpsAtDeposit,
+        uint256 claimableRewardNow
+    ) {
+        UserDeposit[] storage list = userDeposits[podId][user];
+        if (index >= list.length) return (0, 0, 0, 0, 0);
+        UserDeposit storage d = list[index];
+        principalWei = d.principalWei;
+        unlockAt = d.unlockAt;
+        accruedRewardAtLock = d.accruedRewardAtLock;
+        rateBpsAtDeposit = d.rateBpsAtDeposit;
+        claimableRewardNow = _computeReward(d);
+        return (principalWei, unlockAt, accruedRewardAtLock, rateBpsAtDeposit, claimableRewardNow);
+    }
+
+    function getMultiplePodSummaries(uint256[] calldata podIds) external view returns (
+        uint256[] memory lockSecondsArr,
+        uint256[] memory rateBpsArr,
+        uint256[] memory capWeiArr,
+        uint256[] memory totalDepositedArr,
+        bool[] memory activeArr
+    ) {
+        uint256 n = podIds.length;
+        lockSecondsArr = new uint256[](n);
+        rateBpsArr = new uint256[](n);
+        capWeiArr = new uint256[](n);
+        totalDepositedArr = new uint256[](n);
+        activeArr = new bool[](n);
+        for (uint256 i = 0; i < n; i++) {
+            PodConfig storage p = podConfig[podIds[i]];
+            lockSecondsArr[i] = p.lockSeconds;
+            rateBpsArr[i] = p.rateBps;
+            capWeiArr[i] = p.capWei;
+            totalDepositedArr[i] = p.totalDeposited;
+            activeArr[i] = p.active;
+        }
+        return (lockSecondsArr, rateBpsArr, capWeiArr, totalDepositedArr, activeArr);
+    }
+
+    function getProtocolHealth() external view returns (bool balanceOk, uint256 balanceWei, uint256 reservedWei) {
+        balanceWei = address(this).balance;
+        reservedWei = _totalReservedWei();
+        balanceOk = balanceWei >= reservedWei;
+        return (balanceOk, balanceWei, reservedWei);
+    }
+
+    function getMinDepositAfterFee(uint256 grossWei) external view returns (uint256) {
+        return grossWei - (grossWei * feeBps) / BPS_DENOM;
