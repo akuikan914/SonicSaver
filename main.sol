@@ -1438,3 +1438,83 @@ contract SonicSaver {
 
     function getMinDepositAfterFee(uint256 grossWei) external view returns (uint256) {
         return grossWei - (grossWei * feeBps) / BPS_DENOM;
+    }
+
+    function getFeeForGross(uint256 grossWei) external view returns (uint256) {
+        return (grossWei * feeBps) / BPS_DENOM;
+    }
+
+    function getGrossRequiredForNet(uint256 netWei) external view returns (uint256) {
+        if (BPS_DENOM <= feeBps) return netWei;
+        return (netWei * BPS_DENOM + (BPS_DENOM - feeBps - 1)) / (BPS_DENOM - feeBps);
+    }
+
+    function getLockEndTime(uint256 podId, uint256 depositTimestamp) external view returns (uint256) {
+        PodConfig storage p = podConfig[podId];
+        if (!p.active) return 0;
+        return depositTimestamp + p.lockSeconds;
+    }
+
+    function getRewardRatePerSecondPerWei(uint256 rateBps) external pure returns (uint256) {
+        return (rateBps * 1e18) / (BPS_DENOM * SECONDS_PER_YEAR);
+    }
+
+    function getRewardForPrincipalAndElapsed(uint256 principalWei, uint256 rateBps, uint256 elapsedSeconds) external pure returns (uint256) {
+        return (principalWei * rateBps * elapsedSeconds) / (BPS_DENOM * SECONDS_PER_YEAR);
+    }
+
+    function supportsPod(uint256 podId) external view returns (bool) {
+        return podId >= 1 && podId < nextPodId && podConfig[podId].active;
+    }
+
+    function getActivePodCount() external view returns (uint256) {
+        uint256 c = 0;
+        for (uint256 id = 1; id < nextPodId; id++) {
+            if (podConfig[id].active) c++;
+        }
+        return c;
+    }
+
+    function getTotalDepositsInPod(uint256 podId) external view returns (uint256) {
+        return podConfig[podId].totalDeposited;
+    }
+
+    function getPodCreationBlock(uint256 podId) external view returns (uint256) {
+        return podCreatedAtBlock[podId];
+    }
+
+    function getPodDisplayNameHash(uint256 podId) external view returns (bytes32) {
+        return podNameHash[podId];
+    }
+
+    function getVersionConstants() external pure returns (uint256 bps, uint256 maxFee, uint256 minLock, uint256 maxLock) {
+        bps = BPS_DENOM;
+        maxFee = MAX_FEE_BPS;
+        minLock = MIN_LOCK_SECONDS;
+        maxLock = MAX_LOCK_SECONDS;
+    }
+
+    function getCapAndRateConstants() external pure returns (uint256 minCapWei, uint256 maxRateBps, uint256 secsPerYear) {
+        minCapWei = MIN_POD_CAP_WEI;
+        maxRateBps = MAX_RATE_BPS;
+        secsPerYear = SECONDS_PER_YEAR;
+    }
+
+    /// @notice Single-call snapshot for UI: protocol stats + balance + paused.
+    /// @return totalFees Total fees harvested to pulse collector.
+    function getDashboardSnapshot() external view returns (
+        uint256 totalFees,
+        uint256 totalDeposited,
+        uint256 totalWithdrawn,
+        uint256 totalRewardsPaid,
+        uint256 reserved,
+        uint256 contractBalance,
+        uint256 podCount,
+        bool isPaused
+    ) {
+        totalFees = totalFeesHarvestedWei;
+        totalDeposited = totalPrincipalDepositedWei;
+        totalWithdrawn = totalPrincipalWithdrawnWei;
+        totalRewardsPaid = totalRewardPaidWei;
+        reserved = _totalReservedWei();
+        contractBalance = address(this).balance;
