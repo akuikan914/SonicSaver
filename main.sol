@@ -1518,3 +1518,70 @@ contract SonicSaver {
         totalRewardsPaid = totalRewardPaidWei;
         reserved = _totalReservedWei();
         contractBalance = address(this).balance;
+        podCount = nextPodId == 0 ? 0 : nextPodId - 1;
+        isPaused = protocolPaused;
+    }
+
+    // -------------------------------------------------------------------------
+    // BATCH: WITHDRAW MULTIPLE
+    // -------------------------------------------------------------------------
+
+    function withdrawBatch(uint256 podId, uint256[] calldata depositIndices) external nonReentrant {
+        PodConfig storage pod = podConfig[podId];
+        if (!pod.active) revert SSV_PodNotFound();
+        UserDeposit[] storage list = userDeposits[podId][msg.sender];
+        uint256 totalPrincipal = 0;
+        uint256 totalReward = 0;
+        for (uint256 i = 0; i < depositIndices.length; i++) {
+            uint256 idx = depositIndices[i];
+            if (idx >= list.length) continue;
+            UserDeposit storage dep = list[idx];
+            if (dep.principalWei == 0) continue;
+            if (block.timestamp < dep.unlockAt) continue;
+            uint256 reward = _computeReward(dep);
+            totalPrincipal += dep.principalWei;
+            totalReward += reward;
+            dep.principalWei = 0;
+            dep.unlockAt = 0;
+            dep.accruedRewardAtLock = 0;
+            dep.rateBpsAtDeposit = 0;
+        }
+        if (totalPrincipal == 0 && totalReward == 0) revert SSV_NothingToClaim();
+        pod.totalDeposited -= totalPrincipal;
+        totalPrincipalWithdrawnWei += totalPrincipal;
+        totalRewardPaidWei += totalReward;
+        uint256 total = totalPrincipal + totalReward;
+        (bool ok,) = msg.sender.call{value: total}("");
+        if (!ok) revert SSV_TransferFailed();
+        emit WithdrawalExecuted(msg.sender, podId, totalPrincipal, totalReward);
+    }
+
+    function claimRewardBatch(uint256 podId, uint256[] calldata depositIndices) external nonReentrant {
+        UserDeposit[] storage list = userDeposits[podId][msg.sender];
+        uint256 totalReward = 0;
+        for (uint256 i = 0; i < depositIndices.length; i++) {
+            uint256 idx = depositIndices[i];
+            if (idx >= list.length) continue;
+            UserDeposit storage dep = list[idx];
+            if (dep.principalWei == 0) continue;
+            if (block.timestamp < dep.unlockAt) continue;
+            uint256 reward = _computeReward(dep);
+            if (reward == 0) continue;
+            totalReward += reward;
+            dep.accruedRewardAtLock += reward;
+        }
+        if (totalReward == 0) revert SSV_NothingToClaim();
+        totalRewardPaidWei += totalReward;
+        (bool ok,) = msg.sender.call{value: totalReward}("");
+        if (!ok) revert SSV_TransferFailed();
+        emit RewardClaimed(msg.sender, podId, totalReward);
+    }
+
+    // -------------------------------------------------------------------------
+    // RECEIVE ETH (donations / accidental)
+    // -------------------------------------------------------------------------
+
+    receive() external payable {
+        emit DepositPlaced(msg.sender, 0, msg.value, 0);
+    }
+}
